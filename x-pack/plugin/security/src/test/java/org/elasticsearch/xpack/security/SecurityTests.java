@@ -94,8 +94,8 @@ import java.util.stream.Collectors;
 
 import static java.util.Collections.emptyMap;
 import static org.elasticsearch.cluster.metadata.IndexMetadata.INDEX_FORMAT_SETTING;
-import static org.elasticsearch.xpack.core.security.index.RestrictedIndicesNames.SECURITY_MAIN_ALIAS;
 import static org.elasticsearch.xpack.security.support.SecuritySystemIndices.INTERNAL_MAIN_INDEX_FORMAT;
+import static org.elasticsearch.xpack.security.support.SecuritySystemIndices.SECURITY_MAIN_ALIAS;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
@@ -129,10 +129,10 @@ public class SecurityTests extends ESTestCase {
 
     private Collection<Object> createComponentsUtil(Settings settings, SecurityExtension... extensions) throws Exception {
         Environment env = TestEnvironment.newEnvironment(settings);
-        NodeMetadata nodeMetadata = new NodeMetadata(randomAlphaOfLength(8), Version.CURRENT);
+        NodeMetadata nodeMetadata = new NodeMetadata(randomAlphaOfLength(8), Version.CURRENT, Version.CURRENT);
         licenseState = new TestUtils.UpdatableLicenseState(settings);
         SSLService sslService = new SSLService(env);
-        security = new Security(settings, null, Arrays.asList(extensions)) {
+        security = new Security(settings, Arrays.asList(extensions)) {
             @Override
             protected XPackLicenseState getLicenseState() {
                 return licenseState;
@@ -651,15 +651,15 @@ public class SecurityTests extends ESTestCase {
         }
     }
 
-    public void testSecurityPluginInstallsRestHandlerWrapperEvenIfSecurityIsDisabled() throws IllegalAccessException {
+    public void testSecurityPluginInstallsRestHandlerInterceptorEvenIfSecurityIsDisabled() throws IllegalAccessException {
         Settings settings = Settings.builder().put("xpack.security.enabled", false).put("path.home", createTempDir()).build();
         SettingsModule settingsModule = new SettingsModule(Settings.EMPTY);
         ThreadPool threadPool = new TestThreadPool(getTestName());
 
         try {
             UsageService usageService = new UsageService();
-            Security security = new Security(settings, null);
-            assertTrue(security.getRestHandlerWrapper(threadPool.getThreadContext()) != null);
+            Security security = new Security(settings);
+            assertTrue(security.getRestHandlerInterceptor(threadPool.getThreadContext()) != null);
 
         } finally {
             threadPool.shutdown();
@@ -667,7 +667,7 @@ public class SecurityTests extends ESTestCase {
 
     }
 
-    public void testSecurityRestHandlerWrapperCanBeInstalled() throws IllegalAccessException {
+    public void testSecurityRestHandlerInterceptorCanBeInstalled() throws IllegalAccessException {
         final Logger amLogger = LogManager.getLogger(ActionModule.class);
         Loggers.setLevel(amLogger, Level.DEBUG);
         final MockLogAppender appender = new MockLogAppender();
@@ -680,16 +680,16 @@ public class SecurityTests extends ESTestCase {
 
         try {
             UsageService usageService = new UsageService();
-            Security security = new Security(settings, null);
+            Security security = new Security(settings);
 
-            // Verify Security rest wrapper is about to be installed
-            // We will throw later if another wrapper is already installed
+            // Verify Security rest interceptor is about to be installed
+            // We will throw later if another interceptor is already installed
             appender.addExpectation(
                 new MockLogAppender.SeenEventExpectation(
-                    "Security rest wrapper",
+                    "Security rest interceptor",
                     ActionModule.class.getName(),
                     Level.DEBUG,
-                    "Using REST wrapper from plugin org.elasticsearch.xpack.security.Security"
+                    "Using REST interceptor from plugin org.elasticsearch.xpack.security.Security"
                 )
             );
 

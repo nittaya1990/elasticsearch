@@ -29,6 +29,7 @@ import org.elasticsearch.index.query.SearchExecutionContext;
 import org.elasticsearch.search.rescore.RescoreContext;
 import org.elasticsearch.search.rescore.Rescorer;
 import org.elasticsearch.search.rescore.RescorerBuilder;
+import org.elasticsearch.Version;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -173,10 +174,10 @@ public class ExampleRescoreBuilder extends RescorerBuilder<ExampleRescoreBuilder
                             endDoc = leaf.docBase + leaf.reader().maxDoc();
                         } while (topDocs.scoreDocs[i].doc >= endDoc);
                         LeafFieldData fd = context.factorField.load(leaf);
-                        if (false == (fd instanceof LeafNumericFieldData leafNumericFieldData)) {
+                        if (false == (fd instanceof LeafNumericFieldData)) {
                             throw new IllegalArgumentException("[" + context.factorField.getFieldName() + "] is not a number");
                         }
-                        data = leafNumericFieldData.getDoubleValues();
+                        data = ((LeafNumericFieldData) fd).getDoubleValues();
                     }
                     if (false == data.advanceExact(topDocs.scoreDocs[i].doc - leaf.docBase)) {
                         throw new IllegalArgumentException("document [" + topDocs.scoreDocs[i].doc
@@ -211,5 +212,10 @@ public class ExampleRescoreBuilder extends RescorerBuilder<ExampleRescoreBuilder
             return Explanation.match(context.factor, "test", singletonList(sourceExplanation));
         }
 
+    }
+
+    @Override
+    public Version getMinimalSupportedVersion() {
+        return Version.V_EMPTY;
     }
 }

@@ -9,7 +9,6 @@
 package org.elasticsearch.index.mapper;
 
 import org.elasticsearch.common.compress.CompressedXContent;
-import org.elasticsearch.common.regex.Regex;
 import org.elasticsearch.index.IndexSettings;
 
 import java.util.List;
@@ -61,10 +60,6 @@ public class DocumentMapper {
         return metadataMapper(SourceFieldMapper.class);
     }
 
-    public IdFieldMapper idFieldMapper() {
-        return metadataMapper(IdFieldMapper.class);
-    }
-
     public RoutingFieldMapper routingFieldMapper() {
         return metadataMapper(RoutingFieldMapper.class);
     }
@@ -95,7 +90,15 @@ public class DocumentMapper {
                 );
             }
         }
-        if (settings.getIndexSortConfig().hasIndexSort() && mappers().hasNested()) {
+
+        /*
+         * Build an empty source loader to validate that the mapping is compatible
+         * with the source loading strategy declared on the source field mapper.
+         */
+        sourceMapper().newSourceLoader(mapping().getRoot());
+
+        settings.getMode().validateMapping(mappingLookup);
+        if (settings.getIndexSortConfig().hasIndexSort() && mappers().nestedLookup() != NestedLookup.EMPTY) {
             throw new IllegalArgumentException("cannot have nested fields when index sort is activated");
         }
         List<String> routingPaths = settings.getIndexMetadata().getRoutingPaths();
@@ -104,7 +107,8 @@ public class DocumentMapper {
                 mappingLookup.getFieldType(match).validateMatchedRoutingPath();
             }
             for (String objectName : mappingLookup.objectMappers().keySet()) {
-                if (Regex.simpleMatch(path, objectName)) {
+                // object type is not allowed in the routing paths
+                if (path.equals(objectName)) {
                     throw new IllegalArgumentException(
                         "All fields that match routing_path must be keywords with [time_series_dimension: true] "
                             + "and without the [script] parameter. ["
@@ -117,6 +121,5 @@ public class DocumentMapper {
         if (checkLimits) {
             this.mappingLookup.checkLimits(settings);
         }
-        settings.getMode().validateMapping(mappingLookup);
     }
 }

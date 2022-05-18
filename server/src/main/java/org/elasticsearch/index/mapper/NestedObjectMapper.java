@@ -15,7 +15,6 @@ import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.xcontent.XContentBuilder;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
@@ -68,6 +67,9 @@ public class NestedObjectMapper extends ObjectMapper {
                     iterator.remove();
                 }
             }
+            if (builder.subobjects.explicit()) {
+                throw new MapperParsingException("Nested type [" + name + "] does not support [subobjects] parameter");
+            }
             return builder;
         }
 
@@ -93,7 +95,7 @@ public class NestedObjectMapper extends ObjectMapper {
     private final Query nestedTypeFilter;
 
     NestedObjectMapper(String name, String fullPath, Map<String, Mapper> mappers, Builder builder) {
-        super(name, fullPath, builder.enabled, builder.dynamic, mappers);
+        super(name, fullPath, builder.enabled, Explicit.IMPLICIT_TRUE, builder.dynamic, mappers);
         if (builder.indexCreatedVersion.before(Version.V_8_0_0)) {
             this.nestedTypePath = "__" + fullPath;
         } else {
@@ -134,7 +136,17 @@ public class NestedObjectMapper extends ObjectMapper {
     }
 
     public Map<String, Mapper> getChildren() {
-        return Collections.unmodifiableMap(this.mappers);
+        return this.mappers;
+    }
+
+    @Override
+    public ObjectMapper.Builder newBuilder(Version indexVersionCreated) {
+        NestedObjectMapper.Builder builder = new NestedObjectMapper.Builder(simpleName(), indexVersionCreated);
+        builder.enabled = enabled;
+        builder.dynamic = dynamic;
+        builder.includeInRoot = includeInRoot;
+        builder.includeInParent = includeInParent;
+        return builder;
     }
 
     @Override
@@ -164,7 +176,6 @@ public class NestedObjectMapper extends ObjectMapper {
         }
         NestedObjectMapper mergeWithObject = (NestedObjectMapper) mergeWith;
         NestedObjectMapper toMerge = (NestedObjectMapper) clone();
-
         if (reason == MapperService.MergeReason.INDEX_TEMPLATE) {
             if (mergeWithObject.includeInParent.explicit()) {
                 toMerge.includeInParent = mergeWithObject.includeInParent;
@@ -182,5 +193,10 @@ public class NestedObjectMapper extends ObjectMapper {
         }
         toMerge.doMerge(mergeWithObject, reason);
         return toMerge;
+    }
+
+    @Override
+    public SourceLoader.SyntheticFieldLoader syntheticFieldLoader() {
+        throw new IllegalArgumentException("field [" + name() + "] of type [" + typeName() + "] doesn't support synthetic source");
     }
 }

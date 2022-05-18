@@ -33,7 +33,6 @@
           name: os
           values:
             - centos-7-packaging
-            - centos-8-packaging
             - debian-9-packaging
             - debian-10-packaging
             - debian-11-packaging
@@ -60,4 +59,4 @@
             RUNTIME_JAVA_HOME=$HOME/.java/$ES_RUNTIME_JAVA
       - shell: |
           #!/usr/local/bin/runbld --redirect-stderr
-          ./.ci/os.sh --build-cache -Dorg.elasticsearch.build.cache.url=https://gradle-enterprise.elastic.co/cache/ $PACKAGING_TASK
+          ./.ci/scripts/packaging-test.sh --build-cache -Dorg.elasticsearch.build.cache.url=https://gradle-enterprise.elastic.co/cache/ $PACKAGING_TASK

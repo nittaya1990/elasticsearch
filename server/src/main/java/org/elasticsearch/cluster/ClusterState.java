@@ -54,6 +54,9 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Consumer;
+
+import static org.elasticsearch.gateway.GatewayService.STATE_NOT_RECOVERED_BLOCK;
 
 /**
  * Represents the state of the cluster, held in memory on all nodes in the cluster with updates coordinated by the elected master.
@@ -237,6 +240,17 @@ public class ClusterState implements ToXContentFragment, Diffable<ClusterState> 
 
     public DiscoveryNodes getNodes() {
         return nodes();
+    }
+
+    /**
+     * Returns the set of nodes that should be exposed to things like REST handlers that behave differently depending on the nodes in the
+     * cluster and their versions. Specifically, if the cluster has properly formed then this is the nodes in the last-applied cluster
+     * state, but if the cluster has not properly formed then no nodes are returned.
+     *
+     * @return the nodes in the cluster if the cluster has properly formed, otherwise an empty set of nodes.
+     */
+    public DiscoveryNodes nodesIfRecovered() {
+        return blocks.hasGlobalBlock(STATE_NOT_RECOVERED_BLOCK) ? DiscoveryNodes.EMPTY_NODES : nodes;
     }
 
     public Metadata metadata() {
@@ -521,10 +535,11 @@ public class ClusterState implements ToXContentFragment, Diffable<ClusterState> 
             for (IndexRoutingTable indexRoutingTable : routingTable()) {
                 builder.startObject(indexRoutingTable.getIndex().getName());
                 builder.startObject("shards");
-                for (IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
+                for (int shardId = 0; shardId < indexRoutingTable.size(); shardId++) {
+                    IndexShardRoutingTable indexShardRoutingTable = indexRoutingTable.shard(shardId);
                     builder.startArray(Integer.toString(indexShardRoutingTable.shardId().id()));
-                    for (ShardRouting shardRouting : indexShardRoutingTable) {
-                        shardRouting.toXContent(builder, params);
+                    for (int copy = 0; copy < indexShardRoutingTable.size(); copy++) {
+                        indexShardRoutingTable.shard(copy).toXContent(builder, params);
                     }
                     builder.endArray();
                 }
@@ -575,6 +590,16 @@ public class ClusterState implements ToXContentFragment, Diffable<ClusterState> 
         return new Builder(state);
     }
 
+    public ClusterState copyAndUpdate(Consumer<Builder> updater) {
+        var builder = builder(this);
+        updater.accept(builder);
+        return builder.build();
+    }
+
+    public ClusterState copyAndUpdateMetadata(Consumer<Metadata.Builder> updater) {
+        return copyAndUpdate(builder -> builder.metadata(metadata().copyAndUpdate(updater)));
+    }
+
     public static class Builder {
 
         private ClusterState previous;
@@ -618,6 +643,10 @@ public class ClusterState implements ToXContentFragment, Diffable<ClusterState> 
 
         public DiscoveryNodes nodes() {
             return nodes;
+        }
+
+        public Builder routingTable(RoutingTable.Builder routingTableBuilder) {
+            return routingTable(routingTableBuilder.build());
         }
 
         public Builder routingTable(RoutingTable routingTable) {
@@ -670,8 +699,8 @@ public class ClusterState implements ToXContentFragment, Diffable<ClusterState> 
         }
 
         public Builder customs(ImmutableOpenMap<String, Custom> customs) {
-            customs.stream().forEach(entry -> Objects.requireNonNull(entry.getValue(), entry.getKey()));
-            this.customs.putAll(customs);
+            customs.forEach((key, value) -> Objects.requireNonNull(value, key));
+            this.customs.putAllFromMap(customs);
             return this;
         }
 

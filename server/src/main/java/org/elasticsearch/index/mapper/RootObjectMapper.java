@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.function.BiConsumer;
-import java.util.stream.Collectors;
 
 import static org.elasticsearch.common.xcontent.support.XContentMapValues.nodeBooleanValue;
 import static org.elasticsearch.index.mapper.TypeParsers.parseDateTimeFormatter;
@@ -67,9 +66,9 @@ public class RootObjectMapper extends ObjectMapper {
         protected Explicit<DynamicTemplate[]> dynamicTemplates = Defaults.DYNAMIC_TEMPLATES;
         protected Explicit<DateFormatter[]> dynamicDateTimeFormatters = Defaults.DYNAMIC_DATE_TIME_FORMATTERS;
 
+        protected final Map<String, RuntimeField> runtimeFields = new HashMap<>();
         protected Explicit<Boolean> dateDetection = Defaults.DATE_DETECTION;
         protected Explicit<Boolean> numericDetection = Defaults.NUMERIC_DETECTION;
-        protected Map<String, RuntimeField> runtimeFields;
 
         public Builder(String name) {
             super(name);
@@ -91,8 +90,13 @@ public class RootObjectMapper extends ObjectMapper {
             return this;
         }
 
-        public RootObjectMapper.Builder setRuntime(Map<String, RuntimeField> runtimeFields) {
-            this.runtimeFields = runtimeFields;
+        public RootObjectMapper.Builder addRuntimeField(RuntimeField runtimeField) {
+            this.runtimeFields.put(runtimeField.name(), runtimeField);
+            return this;
+        }
+
+        public RootObjectMapper.Builder addRuntimeFields(Map<String, RuntimeField> runtimeFields) {
+            this.runtimeFields.putAll(runtimeFields);
             return this;
         }
 
@@ -101,9 +105,10 @@ public class RootObjectMapper extends ObjectMapper {
             return new RootObjectMapper(
                 name,
                 enabled,
+                subobjects,
                 dynamic,
                 buildMappers(true, context),
-                runtimeFields == null ? Collections.emptyMap() : runtimeFields,
+                runtimeFields,
                 dynamicDateTimeFormatters,
                 dynamicTemplates,
                 dateDetection,
@@ -162,7 +167,7 @@ public class RootObjectMapper extends ObjectMapper {
         }
 
         @SuppressWarnings("unchecked")
-        private boolean processField(
+        private static boolean processField(
             RootObjectMapper.Builder builder,
             String fieldName,
             Object fieldNode,
@@ -228,7 +233,7 @@ public class RootObjectMapper extends ObjectMapper {
                         parserContext,
                         true
                     );
-                    builder.setRuntime(fields);
+                    builder.addRuntimeFields(fields);
                     return true;
                 } else {
                     throw new ElasticsearchParseException("runtime must be a map type");
@@ -247,6 +252,7 @@ public class RootObjectMapper extends ObjectMapper {
     RootObjectMapper(
         String name,
         Explicit<Boolean> enabled,
+        Explicit<Boolean> subobjects,
         Dynamic dynamic,
         Map<String, Mapper> mappers,
         Map<String, RuntimeField> runtimeFields,
@@ -255,7 +261,7 @@ public class RootObjectMapper extends ObjectMapper {
         Explicit<Boolean> dateDetection,
         Explicit<Boolean> numericDetection
     ) {
-        super(name, name, enabled, dynamic, mappers);
+        super(name, name, enabled, subobjects, dynamic, mappers);
         this.runtimeFields = runtimeFields;
         this.dynamicTemplates = dynamicTemplates;
         this.dynamicDateTimeFormatters = dynamicDateTimeFormatters;
@@ -271,18 +277,12 @@ public class RootObjectMapper extends ObjectMapper {
     }
 
     @Override
-    RootObjectMapper copyAndReset() {
-        RootObjectMapper copy = (RootObjectMapper) super.copyAndReset();
-        // for dynamic updates, no need to carry root-specific options, we just
-        // set everything to their implicit default value so that they are not
-        // applied at merge time
-        copy.dynamicTemplates = Defaults.DYNAMIC_TEMPLATES;
-        copy.dynamicDateTimeFormatters = Defaults.DYNAMIC_DATE_TIME_FORMATTERS;
-        copy.dateDetection = Defaults.DATE_DETECTION;
-        copy.numericDetection = Defaults.NUMERIC_DETECTION;
-        // also no need to carry the already defined runtime fields, only new ones need to be added
-        copy.runtimeFields.clear();
-        return copy;
+    public RootObjectMapper.Builder newBuilder(Version indexVersionCreated) {
+        RootObjectMapper.Builder builder = new RootObjectMapper.Builder(name());
+        builder.enabled = enabled;
+        builder.subobjects = subobjects;
+        builder.dynamic = dynamic;
+        return builder;
     }
 
     /**
@@ -368,12 +368,6 @@ public class RootObjectMapper extends ObjectMapper {
         }
     }
 
-    void addRuntimeFields(Collection<RuntimeField> runtimeFields) {
-        for (RuntimeField runtimeField : runtimeFields) {
-            this.runtimeFields.put(runtimeField.name(), runtimeField);
-        }
-    }
-
     @Override
     protected void doXContent(XContentBuilder builder, ToXContent.Params params) throws IOException {
         final boolean includeDefaults = params.paramAsBoolean("include_defaults", false);
@@ -408,7 +402,7 @@ public class RootObjectMapper extends ObjectMapper {
             List<RuntimeField> sortedRuntimeFields = runtimeFields.values()
                 .stream()
                 .sorted(Comparator.comparing(RuntimeField::name))
-                .collect(Collectors.toList());
+                .toList();
             for (RuntimeField fieldType : sortedRuntimeFields) {
                 fieldType.toXContent(builder, params);
             }
@@ -516,5 +510,10 @@ public class RootObjectMapper extends ObjectMapper {
             return ((String) value).contains(snippet);
         }
         return false;
+    }
+
+    @Override
+    protected void startSyntheticField(XContentBuilder b) throws IOException {
+        b.startObject();
     }
 }

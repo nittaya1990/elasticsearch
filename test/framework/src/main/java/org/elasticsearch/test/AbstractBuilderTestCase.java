@@ -28,10 +28,10 @@ import org.elasticsearch.common.compress.CompressedXContent;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.regex.Regex;
 import org.elasticsearch.common.settings.IndexScopedSettings;
-import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsModule;
-import org.elasticsearch.core.internal.io.IOUtils;
+import org.elasticsearch.common.xcontent.LoggingDeprecationHandler;
+import org.elasticsearch.core.IOUtils;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.TestEnvironment;
 import org.elasticsearch.index.Index;
@@ -40,7 +40,6 @@ import org.elasticsearch.index.analysis.IndexAnalyzers;
 import org.elasticsearch.index.cache.bitset.BitsetFilterCache;
 import org.elasticsearch.index.fielddata.IndexFieldDataCache;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
-import org.elasticsearch.index.mapper.IdFieldMapper;
 import org.elasticsearch.index.mapper.MapperRegistry;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.query.SearchExecutionContext;
@@ -65,6 +64,7 @@ import org.elasticsearch.script.ScriptModule;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.search.SearchModule;
 import org.elasticsearch.xcontent.NamedXContentRegistry;
+import org.elasticsearch.xcontent.XContentParserConfiguration;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -186,7 +186,7 @@ public abstract class AbstractBuilderTestCase extends ESTestCase {
 
     @Override
     protected NamedXContentRegistry xContentRegistry() {
-        return serviceHolder.xContentRegistry;
+        return serviceHolder.parserConfiguration.registry();
     }
 
     protected NamedWriteableRegistry namedWriteableRegistry() {
@@ -335,7 +335,7 @@ public abstract class AbstractBuilderTestCase extends ESTestCase {
         private final IndexFieldDataService indexFieldDataService;
         private final SearchModule searchModule;
         private final NamedWriteableRegistry namedWriteableRegistry;
-        private final NamedXContentRegistry xContentRegistry;
+        private final XContentParserConfiguration parserConfiguration;
         private final ClientInvocationHandler clientInvocationHandler = new ClientInvocationHandler();
         private final IndexSettings idxSettings;
         private final SimilarityService similarityService;
@@ -369,11 +369,10 @@ public abstract class AbstractBuilderTestCase extends ESTestCase {
                 clientInvocationHandler
             );
             ScriptModule scriptModule = createScriptModule(pluginsService.filterPlugins(ScriptPlugin.class));
-            List<Setting<?>> additionalSettings = pluginsService.getPluginSettings();
             SettingsModule settingsModule = new SettingsModule(
                 nodeSettings,
-                additionalSettings,
-                pluginsService.getPluginSettingsFilter(),
+                pluginsService.flatMap(Plugin::getSettings).toList(),
+                pluginsService.flatMap(Plugin::getSettingsFilter).toList(),
                 Collections.emptySet()
             );
             searchModule = new SearchModule(nodeSettings, pluginsService.filterPlugins(SearchPlugin.class));
@@ -382,9 +381,11 @@ public abstract class AbstractBuilderTestCase extends ESTestCase {
             entries.addAll(IndicesModule.getNamedWriteables());
             entries.addAll(searchModule.getNamedWriteables());
             namedWriteableRegistry = new NamedWriteableRegistry(entries);
-            xContentRegistry = new NamedXContentRegistry(
-                Stream.of(searchModule.getNamedXContents().stream()).flatMap(Function.identity()).collect(toList())
-            );
+            parserConfiguration = XContentParserConfiguration.EMPTY.withRegistry(
+                new NamedXContentRegistry(
+                    Stream.of(searchModule.getNamedXContents().stream()).flatMap(Function.identity()).collect(toList())
+                )
+            ).withDeprecationHandler(LoggingDeprecationHandler.INSTANCE);
             IndexScopedSettings indexScopedSettings = settingsModule.getIndexScopedSettings();
             idxSettings = IndexSettingsModule.newIndexSettings(index, indexSettings, indexScopedSettings);
             AnalysisModule analysisModule = new AnalysisModule(TestEnvironment.newEnvironment(nodeSettings), emptyList());
@@ -395,11 +396,11 @@ public abstract class AbstractBuilderTestCase extends ESTestCase {
             mapperService = new MapperService(
                 idxSettings,
                 indexAnalyzers,
-                xContentRegistry,
+                parserConfiguration,
                 similarityService,
                 mapperRegistry,
                 () -> createShardContext(null),
-                IdFieldMapper.NO_FIELD_DATA,
+                idxSettings.getMode().buildNoFieldDataIdFieldMapper(),
                 ScriptCompiler.NONE
             );
             IndicesFieldDataCache indicesFieldDataCache = new IndicesFieldDataCache(nodeSettings, new IndexFieldDataCache.Listener() {
@@ -502,7 +503,7 @@ public abstract class AbstractBuilderTestCase extends ESTestCase {
                 mapperService.mappingLookup(),
                 similarityService,
                 scriptService,
-                xContentRegistry,
+                parserConfiguration,
                 namedWriteableRegistry,
                 this.client,
                 searcher,
